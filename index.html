@@ -404,15 +404,81 @@ fileClear.addEventListener('click', (e) => {
   fileClear.style.display = 'none';
 });
 
+/* ---- storage adapter: pakai penyimpanan bawaan Claude jika tersedia,
+   kalau tidak (mis. file dibuka langsung di browser) otomatis pakai
+   localStorage browser sebagai cadangan agar tetap bisa menyimpan ---- */
+let usingFallback = false;
+
+async function nativeStorageWorks(){
+  try{
+    if(typeof window.storage === 'undefined' || !window.storage || typeof window.storage.set !== 'function') return false;
+    const testKey = '__probe__';
+    await window.storage.set(testKey, '1', false);
+    await window.storage.delete(testKey, false);
+    return true;
+  }catch(e){ return false; }
+}
+
+const localAdapter = {
+  async get(key){
+    const v = localStorage.getItem(key);
+    return v === null ? null : { key, value: v, shared:false };
+  },
+  async set(key, value){
+    localStorage.setItem(key, value);
+    return { key, value, shared:false };
+  },
+  async delete(key){
+    localStorage.removeItem(key);
+    return { key, deleted:true, shared:false };
+  },
+  async list(prefix){
+    const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
+    return { keys, prefix, shared:false };
+  }
+};
+
+let storageAdapter = null;
+async function getStorage(){
+  if(storageAdapter) return storageAdapter;
+  const ok = await nativeStorageWorks();
+  if(ok){
+    usingFallback = false;
+    storageAdapter = {
+      get:(k)=>window.storage.get(k, false),
+      set:(k,v)=>window.storage.set(k, v, false),
+      delete:(k)=>window.storage.delete(k, false),
+      list:(p)=>window.storage.list(p, false)
+    };
+  }else{
+    usingFallback = true;
+    storageAdapter = localAdapter;
+  }
+  return storageAdapter;
+}
+
+function showFallbackNotice(){
+  if(document.getElementById('fallbackNotice')) return;
+  const notice = document.createElement('div');
+  notice.id = 'fallbackNotice';
+  notice.style.cssText = 'background:#FFF6DD;border:1px solid #F0DBA0;color:#7A5C1E;font-size:12.5px;padding:9px 14px;border-radius:8px;margin-bottom:18px;';
+  notice.textContent = 'Penyimpanan cloud Claude tidak terdeteksi di tampilan ini — data disimpan di browser perangkat ini saja (tidak ikut tersimpan kalau dibuka dari perangkat lain).';
+  const folder = document.querySelector('.folder');
+  const brand = document.querySelector('.brand');
+  folder.insertBefore(notice, brand.nextSibling);
+}
+
 async function loadEntries(){
   listEl.innerHTML = '<div class="empty">Memuat arsip…</div>';
   try{
-    const listed = await window.storage.list(STORAGE_PREFIX, false);
+    const store = await getStorage();
+    if(usingFallback) showFallbackNotice();
+    const listed = await store.list(STORAGE_PREFIX);
     const keys = (listed && listed.keys) || [];
     const results = [];
     for(const k of keys){
       try{
-        const r = await window.storage.get(k, false);
+        const r = await store.get(k);
         if(r && r.value) results.push(JSON.parse(r.value));
       }catch(e){ /* skip missing */ }
     }
@@ -473,11 +539,12 @@ function render(){
 
 window.deleteEntry = async function(id){
   try{
-    await window.storage.delete(STORAGE_PREFIX + id, false);
+    const store = await getStorage();
+    await store.delete(STORAGE_PREFIX + id);
     entries = entries.filter(e => e.id !== id);
     render();
   }catch(e){
-    formMsg.textContent = 'Gagal menghapus catatan.';
+    formMsg.textContent = 'Gagal menghapus catatan: ' + (e && e.message ? e.message : 'tidak diketahui');
   }
 };
 
@@ -503,8 +570,10 @@ form.addEventListener('submit', async (e) => {
   btn.disabled = true;
   btn.textContent = 'Menyimpan…';
   try{
-    const result = await window.storage.set(STORAGE_PREFIX + id, JSON.stringify(entry), false);
-    if(!result) throw new Error('failed');
+    const store = await getStorage();
+    if(usingFallback) showFallbackNotice();
+    const result = await store.set(STORAGE_PREFIX + id, JSON.stringify(entry));
+    if(!result) throw new Error('penyimpanan tidak merespons');
     entries.unshift(entry);
     entries.sort((a,b) => (b.tanggal || '').localeCompare(a.tanggal || '') || (b.createdAt||0)-(a.createdAt||0));
     updateJenisList();
@@ -514,7 +583,12 @@ form.addEventListener('submit', async (e) => {
     fileClear.style.display = 'none';
     currentFile = null;
   }catch(err){
-    formMsg.textContent = 'Gagal menyimpan. Coba lagi.';
+    const detail = (err && err.message) ? err.message : 'tidak diketahui';
+    if(/quota|exceed/i.test(detail)){
+      formMsg.textContent = 'Gagal menyimpan: penyimpanan browser penuh (berkas mungkin terlalu besar).';
+    }else{
+      formMsg.textContent = 'Gagal menyimpan (' + detail + '). Coba lagi.';
+    }
   }finally{
     btn.disabled = false;
     btn.textContent = 'Simpan ke arsip';
