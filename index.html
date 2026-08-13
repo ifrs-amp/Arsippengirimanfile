@@ -157,6 +157,81 @@ input[type=text]:focus, input[type=date]:focus, select:focus{
   font-family:'Inter',sans-serif;
 }
 
+.file-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.file-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  background:var(--paper);
+  border:1px solid var(--line);
+  color:var(--ink-soft);
+  font-size:12.5px;
+  padding:6px 8px 6px 12px;
+  border-radius:20px;
+  max-width:100%;
+}
+.file-chip .fc-name{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:220px;
+}
+.file-chip button{
+  background:#fff;
+  border:none;
+  color:var(--danger);
+  width:18px;height:18px;
+  border-radius:50%;
+  cursor:pointer;
+  font-size:12px;
+  line-height:1;
+  flex-shrink:0;
+}
+
+.settings-btn{
+  position:absolute;
+  top:26px;
+  right:26px;
+  width:36px;height:36px;
+  border-radius:50%;
+  border:1px solid var(--line);
+  background:#fff;
+  color:var(--ink-soft);
+  font-size:16px;
+  cursor:pointer;
+}
+.settings-btn:hover{ border-color:var(--ink-soft); }
+.folder{ position:relative; }
+
+.settings-panel{
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:16px 18px;
+  margin-bottom:24px;
+}
+.settings-panel label{ font-size:12.5px; font-weight:600; color:var(--ink-soft); }
+.settings-row{ display:flex; gap:8px; margin-top:6px; }
+.settings-row input{
+  flex:1;
+  border:1px solid var(--line);
+  border-radius:7px;
+  padding:9px 11px;
+  font-size:13px;
+  font-family:'IBM Plex Mono',monospace;
+  background:#fff;
+}
+button.primary.small{ padding:8px 16px; font-size:12.5px; }
+.settings-hint{ font-size:12px; color:var(--muted); margin:10px 0 0; line-height:1.5; }
+.settings-status{ font-size:12px; margin:8px 0 0; font-weight:600; }
+.settings-status.ok{ color:var(--sage); }
+.settings-status.err{ color:var(--danger); }
+
 .actions{ margin-top:20px; display:flex; align-items:center; gap:14px; }
 button.primary{
   background:var(--ink);
@@ -264,9 +339,10 @@ button.primary:active{ transform:scale(0.98); }
 }
 .meta{ font-size:13px; color:var(--ink-soft); line-height:1.6; }
 .meta b{ color:var(--muted); font-weight:500; }
+.file-links{ display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:4px; }
 .file-link{
   display:inline-flex; align-items:center; gap:5px;
-  font-size:12.5px; color:var(--sage); text-decoration:none; font-weight:600; margin-top:4px;
+  font-size:12.5px; color:var(--sage); text-decoration:none; font-weight:600;
 }
 .file-link:hover{ text-decoration:underline; }
 
@@ -298,6 +374,18 @@ button.primary:active{ transform:scale(0.98); }
       </div>
     </div>
 
+    <button type="button" id="settingsBtn" class="settings-btn" title="Pengaturan koneksi Google Drive & Sheet">&#9881;</button>
+
+    <div class="settings-panel" id="settingsPanel" style="display:none">
+      <label for="scriptUrl">URL Web App Apps Script</label>
+      <div class="settings-row">
+        <input type="text" id="scriptUrl" placeholder="https://script.google.com/macros/s/…/exec">
+        <button type="button" id="scriptUrlSave" class="primary small">Simpan</button>
+      </div>
+      <p class="settings-hint">Tempel URL deployment Apps Script (lihat Code.gs) di sini agar berkas tersimpan langsung ke folder Drive dan tercatat di spreadsheet, mendukung berkas hingga 10 MB. Kosongkan untuk kembali ke mode penyimpanan lokal browser (maks 2 MB/berkas).</p>
+      <p class="settings-status" id="scriptStatus"></p>
+    </div>
+
     <div class="card">
       <p class="card-label">Catat pengiriman baru</p>
       <form id="form">
@@ -322,10 +410,10 @@ button.primary:active{ transform:scale(0.98); }
           <div class="field full">
             <label>Upload file</label>
             <label class="file-drop" id="dropLabel">
-              <span id="fileText">Klik untuk memilih berkas (opsional, maks 4 MB)</span>
-              <input type="file" id="file">
-              <span class="file-clear" id="fileClear" style="display:none">Hapus</span>
+              <span id="fileText">Klik untuk memilih berkas (boleh lebih dari satu, maks 2 MB per berkas)</span>
+              <input type="file" id="file" multiple>
             </label>
+            <div class="file-chips" id="fileChips"></div>
           </div>
         </div>
         <div class="actions">
@@ -347,7 +435,45 @@ button.primary:active{ transform:scale(0.98); }
 <script>
 const STORAGE_PREFIX = 'arsip:';
 let entries = [];
-let currentFile = null;
+let currentFiles = [];
+let scriptUrl = localStorage.getItem('arsip_script_url') || '';
+
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsPanel = document.getElementById('settingsPanel');
+const scriptUrlInput = document.getElementById('scriptUrl');
+const scriptStatus = document.getElementById('scriptStatus');
+scriptUrlInput.value = scriptUrl;
+
+settingsBtn.addEventListener('click', () => {
+  settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
+});
+
+document.getElementById('scriptUrlSave').addEventListener('click', async () => {
+  const val = scriptUrlInput.value.trim();
+  scriptStatus.textContent = 'Mengecek koneksi…';
+  scriptStatus.className = 'settings-status';
+  if(val){
+    try{
+      const res = await fetch(val, { method:'GET' });
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error || 'respons tidak valid');
+      scriptUrl = val;
+      localStorage.setItem('arsip_script_url', val);
+      scriptStatus.textContent = 'Tersambung ke Google Drive & Sheet. Berkas kini boleh sampai 10 MB.';
+      scriptStatus.className = 'settings-status ok';
+      loadEntries();
+    }catch(e){
+      scriptStatus.textContent = 'Gagal terhubung: ' + (e && e.message ? e.message : 'periksa URL-nya');
+      scriptStatus.className = 'settings-status err';
+    }
+  }else{
+    scriptUrl = '';
+    localStorage.removeItem('arsip_script_url');
+    scriptStatus.textContent = 'Kembali ke mode penyimpanan lokal browser.';
+    scriptStatus.className = 'settings-status';
+    loadEntries();
+  }
+});
 
 const form = document.getElementById('form');
 const listEl = document.getElementById('list');
@@ -356,7 +482,6 @@ const searchEl = document.getElementById('search');
 const formMsg = document.getElementById('formMsg');
 const fileInput = document.getElementById('file');
 const fileText = document.getElementById('fileText');
-const fileClear = document.getElementById('fileClear');
 const jenisList = document.getElementById('jenis-list');
 
 const stampClasses = ['c1','c2','c3','c4'];
@@ -374,35 +499,60 @@ function formatTanggal(iso){
   return d.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' });
 }
 
+function getLimits(){
+  return scriptUrl
+    ? { perFile: 10 * 1024 * 1024, maxFiles: 10, total: 40 * 1024 * 1024, label: '10 MB' }
+    : { perFile: 2 * 1024 * 1024, maxFiles: 6, total: 3.5 * 1024 * 1024, label: '2 MB (mode lokal)' };
+}
+
 fileInput.addEventListener('change', async () => {
-  const f = fileInput.files[0];
-  if(!f) return;
-  if(f.size > 4*1024*1024){
-    formMsg.textContent = 'Berkas terlalu besar (maks 4 MB).';
-    fileInput.value = '';
-    return;
+  const picked = Array.from(fileInput.files || []);
+  fileInput.value = '';
+  const limits = getLimits();
+
+  for(const f of picked){
+    if(currentFiles.length >= limits.maxFiles){
+      formMsg.textContent = `Maksimal ${limits.maxFiles} berkas per catatan.`;
+      break;
+    }
+    if(f.size > limits.perFile){
+      formMsg.textContent = `"${f.name}" terlalu besar (maks ${limits.label} per berkas).`;
+      continue;
+    }
+    const totalSoFar = currentFiles.reduce((s,cf) => s + cf.size, 0);
+    if(totalSoFar + f.size > limits.total){
+      formMsg.textContent = 'Total ukuran berkas sudah mencapai batas. Hapus salah satu dulu.';
+      continue;
+    }
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.onerror = rej;
+      r.readAsDataURL(f);
+    });
+    currentFiles.push({ name: f.name, type: f.type, size: f.size, dataUrl });
+    formMsg.textContent = '';
   }
-  formMsg.textContent = '';
-  const dataUrl = await new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = rej;
-    r.readAsDataURL(f);
-  });
-  currentFile = { name: f.name, type: f.type, dataUrl };
-  fileText.textContent = f.name;
-  fileText.classList.add('file-name');
-  fileClear.style.display = 'inline';
+  renderFileChips();
 });
 
-fileClear.addEventListener('click', (e) => {
-  e.preventDefault();
-  currentFile = null;
-  fileInput.value = '';
-  fileText.textContent = 'Klik untuk memilih berkas (opsional, maks 4 MB)';
-  fileText.classList.remove('file-name');
-  fileClear.style.display = 'none';
-});
+function renderFileChips(){
+  const chips = document.getElementById('fileChips');
+  chips.innerHTML = currentFiles.map((f, i) => `
+    <span class="file-chip">
+      <span class="fc-name">${escapeHtml(f.name)}</span>
+      <button type="button" onclick="removeFile(${i})" aria-label="Hapus berkas">&times;</button>
+    </span>`).join('');
+  const limits = getLimits();
+  fileText.textContent = currentFiles.length
+    ? `${currentFiles.length} berkas dipilih — klik untuk menambah lagi`
+    : `Klik untuk memilih berkas (boleh lebih dari satu, maks ${limits.label} per berkas)`;
+}
+
+window.removeFile = function(index){
+  currentFiles.splice(index, 1);
+  renderFileChips();
+};
 
 /* ---- storage adapter: pakai penyimpanan bawaan Claude jika tersedia,
    kalau tidak (mis. file dibuka langsung di browser) otomatis pakai
@@ -470,6 +620,25 @@ function showFallbackNotice(){
 
 async function loadEntries(){
   listEl.innerHTML = '<div class="empty">Memuat arsip…</div>';
+
+  if(scriptUrl){
+    try{
+      const res = await fetch(scriptUrl, { method:'GET' });
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error || 'gagal memuat');
+      entries = (json.entries || []).map(e => ({
+        ...e,
+        files: (e.fileLinks || []).map(url => ({ name: url.split('/').pop() || 'berkas', driveUrl: url }))
+      }));
+      entries.sort((a,b) => (b.tanggal || '').localeCompare(a.tanggal || '') || (b.createdAt||0)-(a.createdAt||0));
+      updateJenisList();
+      render();
+      return;
+    }catch(e){
+      formMsg.textContent = 'Gagal memuat dari Google Drive/Sheet (' + (e.message||'') + '). Menampilkan data lokal.';
+    }
+  }
+
   try{
     const store = await getStorage();
     if(usingFallback) showFallbackNotice();
@@ -516,8 +685,13 @@ function render(){
 
   listEl.innerHTML = filtered.map(e => {
     const cls = stampClassFor(e.melalui || '');
-    const fileHtml = e.file
-      ? `<a class="file-link" href="${e.file.dataUrl}" download="${escapeHtml(e.file.name)}">&#8595; ${escapeHtml(e.file.name)}</a>`
+    const files = e.files || (e.file ? [e.file] : []);
+    const fileHtml = files.length
+      ? `<div class="file-links">${files.map(f => {
+          const href = f.driveUrl || f.dataUrl;
+          const attrs = f.driveUrl ? `target="_blank" rel="noopener"` : `download="${escapeHtml(f.name)}"`;
+          return `<a class="file-link" href="${href}" ${attrs}>&#8595; ${escapeHtml(f.name)}</a>`;
+        }).join('')}</div>`
       : '';
     return `
     <div class="entry" data-id="${e.id}">
@@ -539,8 +713,18 @@ function render(){
 
 window.deleteEntry = async function(id){
   try{
-    const store = await getStorage();
-    await store.delete(STORAGE_PREFIX + id);
+    if(scriptUrl){
+      const res = await fetch(scriptUrl, {
+        method:'POST',
+        headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action:'delete', id })
+      });
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error || 'gagal menghapus di Sheet');
+    }else{
+      const store = await getStorage();
+      await store.delete(STORAGE_PREFIX + id);
+    }
     entries = entries.filter(e => e.id !== id);
     render();
   }catch(e){
@@ -563,29 +747,39 @@ form.addEventListener('submit', async (e) => {
     return;
   }
 
-  const id = 'e' + Date.now() + Math.random().toString(36).slice(2,7);
-  const entry = { id, tanggal, jenis, melalui, ke, file: currentFile, createdAt: Date.now() };
-
   const btn = form.querySelector('button.primary');
   btn.disabled = true;
   btn.textContent = 'Menyimpan…';
   try{
-    const store = await getStorage();
-    if(usingFallback) showFallbackNotice();
-    const result = await store.set(STORAGE_PREFIX + id, JSON.stringify(entry));
-    if(!result) throw new Error('penyimpanan tidak merespons');
-    entries.unshift(entry);
-    entries.sort((a,b) => (b.tanggal || '').localeCompare(a.tanggal || '') || (b.createdAt||0)-(a.createdAt||0));
-    updateJenisList();
-    render();
+    if(scriptUrl){
+      btn.textContent = 'Mengunggah ke Drive…';
+      const res = await fetch(scriptUrl, {
+        method:'POST',
+        headers:{ 'Content-Type':'text/plain;charset=utf-8' }, // hindari preflight CORS
+        body: JSON.stringify({ tanggal, jenis, melalui, ke, files: currentFiles })
+      });
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error || 'Apps Script menolak permintaan');
+      await loadEntries();
+    }else{
+      const id = 'e' + Date.now() + Math.random().toString(36).slice(2,7);
+      const entry = { id, tanggal, jenis, melalui, ke, files: currentFiles, createdAt: Date.now() };
+      const store = await getStorage();
+      if(usingFallback) showFallbackNotice();
+      const result = await store.set(STORAGE_PREFIX + id, JSON.stringify(entry));
+      if(!result) throw new Error('penyimpanan tidak merespons');
+      entries.unshift(entry);
+      entries.sort((a,b) => (b.tanggal || '').localeCompare(a.tanggal || '') || (b.createdAt||0)-(a.createdAt||0));
+      updateJenisList();
+      render();
+    }
     form.reset();
-    document.getElementById('fileClear').click();
-    fileClear.style.display = 'none';
-    currentFile = null;
+    currentFiles = [];
+    renderFileChips();
   }catch(err){
     const detail = (err && err.message) ? err.message : 'tidak diketahui';
     if(/quota|exceed/i.test(detail)){
-      formMsg.textContent = 'Gagal menyimpan: penyimpanan browser penuh (berkas mungkin terlalu besar).';
+      formMsg.textContent = 'Gagal menyimpan: penyimpanan penuh (berkas mungkin terlalu besar).';
     }else{
       formMsg.textContent = 'Gagal menyimpan (' + detail + '). Coba lagi.';
     }
