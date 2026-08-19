@@ -171,10 +171,23 @@ input[type=text]:focus, input[type=date]:focus, select:focus{
   border:1px solid var(--line);
   color:var(--ink-soft);
   font-size:12.5px;
-  padding:6px 8px 6px 12px;
+  padding:5px 10px 5px 5px;
   border-radius:20px;
   max-width:100%;
 }
+.fp-visual.small{
+  width:26px;height:26px;
+  border-radius:50%;
+  overflow:hidden;
+  flex-shrink:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#fff;
+  border:1px solid var(--line);
+  font-size:13px;
+}
+.fp-visual.small .fp-thumb{ width:100%; height:100%; object-fit:cover; display:block; }
 .file-chip .fc-name{
   overflow:hidden;
   text-overflow:ellipsis;
@@ -567,11 +580,18 @@ fileInput.addEventListener('change', async () => {
 
 function renderFileChips(){
   const chips = document.getElementById('fileChips');
-  chips.innerHTML = currentFiles.map((f, i) => `
+  chips.innerHTML = currentFiles.map((f, i) => {
+    const kind = fileKind(f.name, f.type);
+    const visual = kind === 'image'
+      ? `<img class="fp-thumb" src="${f.dataUrl}" alt="${escapeHtml(f.name)}">`
+      : `<span class="fp-icon">${FILE_ICONS[kind] || FILE_ICONS.file}</span>`;
+    return `
     <span class="file-chip">
+      <span class="fp-visual small">${visual}</span>
       <span class="fc-name">${escapeHtml(f.name)}</span>
       <button type="button" onclick="removeFile(${i})" aria-label="Hapus berkas">&times;</button>
-    </span>`).join('');
+    </span>`;
+  }).join('');
   const limits = getLimits();
   fileText.textContent = currentFiles.length
     ? `${currentFiles.length} berkas dipilih — klik untuk menambah lagi`
