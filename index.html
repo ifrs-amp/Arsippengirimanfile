@@ -339,12 +339,41 @@ button.primary:active{ transform:scale(0.98); }
 }
 .meta{ font-size:13px; color:var(--ink-soft); line-height:1.6; }
 .meta b{ color:var(--muted); font-weight:500; }
-.file-links{ display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:4px; }
-.file-link{
-  display:inline-flex; align-items:center; gap:5px;
-  font-size:12.5px; color:var(--sage); text-decoration:none; font-weight:600;
+.file-previews{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.file-preview{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid var(--line);
+  background:var(--paper);
+  border-radius:8px;
+  padding:6px 10px 6px 6px;
+  text-decoration:none;
+  max-width:190px;
+  transition:border-color .15s, background .15s;
 }
-.file-link:hover{ text-decoration:underline; }
+.file-preview:hover{ border-color:var(--sky); background:#fff; }
+.fp-visual{
+  width:34px;height:34px;
+  border-radius:6px;
+  overflow:hidden;
+  flex-shrink:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#fff;
+  border:1px solid var(--line);
+  font-size:17px;
+}
+.fp-thumb{ width:100%; height:100%; object-fit:cover; display:block; }
+.fp-name{
+  font-size:12px;
+  font-weight:600;
+  color:var(--ink-soft);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
 
 .entry-actions{ display:flex; flex-direction:column; gap:6px; align-items:flex-end; }
 .del-btn{
@@ -628,7 +657,9 @@ async function loadEntries(){
       if(!json.ok) throw new Error(json.error || 'gagal memuat');
       entries = (json.entries || []).map(e => ({
         ...e,
-        files: (e.fileLinks || []).map(url => ({ name: url.split('/').pop() || 'berkas', driveUrl: url }))
+        files: (e.files || []).map(f => ({
+          id: f.id, name: f.name || 'berkas', mimeType: f.mimeType || '', driveUrl: f.url
+        }))
       }));
       entries.sort((a,b) => (b.tanggal || '').localeCompare(a.tanggal || '') || (b.createdAt||0)-(a.createdAt||0));
       updateJenisList();
@@ -669,6 +700,42 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
+function fileKind(name, mimeType){
+  const ext = (name || '').split('.').pop().toLowerCase();
+  const mt = mimeType || '';
+  if(mt.startsWith('image/') || ['jpg','jpeg','png','gif','webp','heic'].includes(ext)) return 'image';
+  if(mt === 'application/pdf' || ext === 'pdf') return 'pdf';
+  if(['doc','docx'].includes(ext) || mt.includes('word')) return 'doc';
+  if(['xls','xlsx','csv'].includes(ext) || mt.includes('sheet')) return 'sheet';
+  if(['ppt','pptx'].includes(ext) || mt.includes('presentation')) return 'slide';
+  if(['zip','rar','7z'].includes(ext)) return 'zip';
+  return 'file';
+}
+
+const FILE_ICONS = { pdf:'📄', doc:'📝', sheet:'📊', slide:'📽️', zip:'🗜️', file:'📁' };
+
+function filePreviewCard(f){
+  const kind = fileKind(f.name, f.mimeType);
+  const href = f.driveUrl || f.dataUrl;
+  const openAttrs = f.driveUrl ? `target="_blank" rel="noopener"` : `download="${escapeHtml(f.name)}"`;
+
+  let visual;
+  if(kind === 'image'){
+    const thumbSrc = f.driveUrl && f.id
+      ? `https://drive.google.com/thumbnail?id=${f.id}&sz=w160`
+      : f.dataUrl;
+    visual = `<img class="fp-thumb" src="${thumbSrc}" alt="${escapeHtml(f.name)}" loading="lazy">`;
+  }else{
+    visual = `<span class="fp-icon">${FILE_ICONS[kind] || FILE_ICONS.file}</span>`;
+  }
+
+  return `
+    <a class="file-preview" href="${href}" ${openAttrs}>
+      <span class="fp-visual">${visual}</span>
+      <span class="fp-name">${escapeHtml(f.name)}</span>
+    </a>`;
+}
+
 function render(){
   const q = searchEl.value.trim().toLowerCase();
   const filtered = entries.filter(e => {
@@ -687,11 +754,7 @@ function render(){
     const cls = stampClassFor(e.melalui || '');
     const files = e.files || (e.file ? [e.file] : []);
     const fileHtml = files.length
-      ? `<div class="file-links">${files.map(f => {
-          const href = f.driveUrl || f.dataUrl;
-          const attrs = f.driveUrl ? `target="_blank" rel="noopener"` : `download="${escapeHtml(f.name)}"`;
-          return `<a class="file-link" href="${href}" ${attrs}>&#8595; ${escapeHtml(f.name)}</a>`;
-        }).join('')}</div>`
+      ? `<div class="file-previews">${files.map(f => filePreviewCard(f)).join('')}</div>`
       : '';
     return `
     <div class="entry" data-id="${e.id}">
