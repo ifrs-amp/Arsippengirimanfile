@@ -535,9 +535,12 @@ function stampClassFor(str){
 function abbrev(str){
   return str.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
 }
-function formatTanggal(iso){
-  if(!iso) return '';
-  const d = new Date(iso+'T00:00:00');
+function formatTanggal(input){
+  if(!input) return '';
+  const s = String(input);
+  // format ISO murni (yyyy-MM-dd) perlu ditambah waktu supaya tidak mundur 1 hari karena zona waktu
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s + 'T00:00:00') : new Date(s);
+  if(isNaN(d.getTime())) return s; // kalau tetap tak terbaca, tampilkan apa adanya, jangan "Invalid Date"
   return d.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' });
 }
 
