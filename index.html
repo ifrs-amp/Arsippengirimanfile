@@ -688,9 +688,11 @@ async function loadEntries(){
 
   if(scriptUrl){
     try{
-      const res = await fetch(scriptUrl, { method:'GET' });
+      const bust = scriptUrl.includes('?') ? '&' : '?';
+      const res = await fetch(scriptUrl + bust + '_t=' + Date.now(), { method:'GET', cache:'no-store' });
       const json = await res.json();
       if(!json.ok) throw new Error(json.error || 'gagal memuat');
+      console.log('[arsip] data mentah dari Apps Script:', json);
       entries = (json.entries || []).map(e => ({
         ...e,
         files: (e.files || []).map(f => ({
@@ -890,6 +892,6 @@ form.addEventListener('submit', async (e) => {
 
 loadEntries();
 </script>
-<p style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);margin-top:24px;">versi build: 2026-08-19-preview-v2</p>
+<p style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);margin-top:24px;">versi build: 2026-08-19-preview-v3</p>
 </body>
 </html>
